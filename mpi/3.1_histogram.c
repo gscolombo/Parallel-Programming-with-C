@@ -25,12 +25,15 @@ float *get_local_data(int rank, int p, int n, int *local_n, float *data) {
       MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    // Handle any remaining data to processes in rank order
+    displacements[0] = 0;
+    sendcounts[0] = k + (r > 0);
+    r--;
+
     int c;
-    for (int i = 0; i < p; i++, r--) {
-      c = k + (r > 0);
+    for (int i = 1; i < p; i++, r--) {
+      c = k + (r > 0); // Handle any remaining data to processes in rank order
       sendcounts[i] = c;
-      displacements[i] = sendcounts[i] - c;
+      displacements[i] = sendcounts[i - 1] + displacements[i - 1];
     }
   }
 
@@ -48,8 +51,6 @@ float *get_local_data(int rank, int p, int n, int *local_n, float *data) {
   if (!rank) {
     MPI_Scatterv(data, sendcounts, displacements, MPI_FLOAT, local_data,
                  *local_n, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
-    free(data);
     free(displacements);
   } else
     MPI_Scatterv(data, sendcounts, displacements, MPI_FLOAT, local_data,
@@ -125,8 +126,9 @@ void count_data(int n, int bins, int *bin_count, float *data,
                 float *bin_maxes) {
   for (int i = 0; i < n; i++) {
     for (int b = 0; b < bins; b++)
-      if ((!b && data[i] <= bin_maxes[b]) ||
-          ((bin_maxes[b - 1] < data[i]) && (data[i] <= bin_maxes[b])))
+      if ((!b && (data[i] <= bin_maxes[b])) ||
+          ((b > 0) && (bin_maxes[b - 1] < data[i]) &&
+           (data[i] <= bin_maxes[b])))
         bin_count[b]++;
   }
 }
@@ -137,7 +139,7 @@ void output_histogram(int bins, int *bin_count, float *bin_maxes,
   printf("\n\n");
   printf(fmt, min_data, bin_maxes[0], bin_count[0]);
   for (int b = 1; b < bins; b++)
-    printf(fmt, bin_maxes[b - 1], bin_maxes[1], bin_count[b]);
+    printf(fmt, bin_maxes[b - 1], bin_maxes[b], bin_count[b]);
 }
 
 int main() {
@@ -155,14 +157,14 @@ int main() {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   if (!rank) {
-    int *bin_count = (int *)calloc(bins, sizeof(int));
+    data = get_input(&n, &bins, &max_data, &min_data);
+    bin_count = (int *)calloc(bins, sizeof(int));
 
     if (!bin_count) {
       printf("Error during memory allocation for global histogram.\n");
+      free(data);
       MPI_Abort(MPI_COMM_WORLD, 1);
     }
-
-    data = get_input(&n, &bins, &max_data, &min_data);
   }
 
   // TODO: Use MPI derived datatype
@@ -171,6 +173,7 @@ int main() {
   MPI_Bcast(&min_data, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
   bin_maxes = get_bin_maxes(max_data, min_data, bins);
+  local_data = get_local_data(rank, p, n, &local_n, data);
 
   local_bin_count = (int *)calloc(bins, sizeof(int));
 
@@ -178,8 +181,6 @@ int main() {
     printf("Error during memory allocation for local histogram.\n");
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
-
-  local_data = get_local_data(rank, p, n, &local_n, data);
 
   count_data(local_n, bins, local_bin_count, local_data, bin_maxes);
 
@@ -190,6 +191,10 @@ int main() {
     output_histogram(bins, bin_count, bin_maxes, min_data);
 
   free(bin_maxes);
+  free(bin_count);
+  free(local_bin_count);
+  free(local_data);
+  free(data);
 
   MPI_Finalize();
 
