@@ -77,23 +77,39 @@ float *get_bin_maxes(float max_data, float min_data, int bins) {
   return bin_maxes;
 }
 
-float *get_input(int *n, int *bins, float *max_data, float *min_data) {
+float *get_input(const char *fname, unsigned long *n, int *bins,
+                 float *max_data, float *min_data) {
   float *data;
   *max_data = -INFINITY;
   *min_data = INFINITY;
+  int read_status;
 
-  printf("N = ");
-  fflush(stdout);
-  scanf("%i", n);
+  FILE *input = fopen(fname, "r");
 
-  if (*n <= 0) {
-    printf("Invalid input. N must be greater than or equal to 1.\n");
+  if (!input) {
+    printf("Error opening file %s.\n", fname);
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
-  printf("Number of bins: ");
-  fflush(stdout);
-  scanf("%i", bins);
+  read_status = fscanf(input, "%lu", n);
+
+  if (!read_status || read_status == EOF) {
+    printf("Error while reading file.\n");
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
+  if (*n <= 0) {
+    printf("Invalid input. N must be greater than or equal to 1. %lu given.\n",
+           *n);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
+  read_status = fscanf(input, "%u", bins);
+  if (!read_status || read_status == EOF) {
+    printf("Error while reading file.\n");
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
   if (*bins <= 0) {
     printf("Invalid input. An histogram must have at least one bin.\n");
     MPI_Abort(MPI_COMM_WORLD, 1);
@@ -105,11 +121,13 @@ float *get_input(int *n, int *bins, float *max_data, float *min_data) {
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
-  *min_data = INFINITY;
+  for (unsigned long i = 0; i < *n; i++) {
+    read_status = fscanf(input, "%f", &data[i]);
 
-  printf("Enter values separated by space: \n");
-  for (int i = 0; i < *n; i++) {
-    scanf("%f", &data[i]);
+    if (!read_status) {
+      printf("Error while reading file.\n");
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
     // Find minimum and maximum data values
     if (data[i] < *min_data)
@@ -119,6 +137,7 @@ float *get_input(int *n, int *bins, float *max_data, float *min_data) {
       *max_data = data[i];
   }
 
+  fclose(input);
   return data;
 }
 
@@ -142,8 +161,9 @@ void output_histogram(int bins, int *bin_count, float *bin_maxes,
     printf(fmt, bin_maxes[b - 1], bin_maxes[b], bin_count[b]);
 }
 
-int main() {
-  int n, bins, rank, p, local_n;
+int main(int argc, char *argv[]) {
+  unsigned long n;
+  int bins, rank, p, local_n;
   int *bin_count, *local_bin_count;
 
   float *local_data, *bin_maxes, *data;
@@ -157,7 +177,12 @@ int main() {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   if (!rank) {
-    data = get_input(&n, &bins, &max_data, &min_data);
+    if (argc <= 1) {
+      printf("No input given. Aborting.\n");
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    data = get_input(argv[1], &n, &bins, &max_data, &min_data);
     bin_count = (int *)calloc(bins, sizeof(int));
 
     if (!bin_count) {
