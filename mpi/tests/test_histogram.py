@@ -62,14 +62,10 @@ def run_histogram(input_file, num_processes):
     """Run the histogram program with given input"""
     print(f"Running histogram with {num_processes} processes...")
     
-    with open(input_file, 'r') as f:
-        input_data = f.read()
-    
     start_time = time.time()
     
     result = subprocess.run(
-        ["mpirun", "-np", str(num_processes), "./histogram"],
-        input=input_data,
+        ["mpirun", "-np", str(num_processes), "-use-hwthread-cpus", "./histogram", input_file],
         capture_output=True,
         text=True,
         encoding='utf-8'
@@ -138,10 +134,17 @@ def main():
         },
         {
             "name": "Very large test",
-            "n": 1000000,
+            "n": 1_000_000,
             "bins": 100,
             "processes": MAX_CORES,
             "distribution": "bimodal"
+        },
+        {
+            "name": "1GB test",
+            "n": 125_000_000,
+            "bins": 50,
+            "processes": MAX_CORES,
+            "distribution": "normal"
         }
     ]
     
