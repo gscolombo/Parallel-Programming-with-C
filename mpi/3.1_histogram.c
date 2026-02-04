@@ -161,6 +161,21 @@ void output_histogram(int bins, int *bin_count, float *bin_maxes,
     printf(fmt, bin_maxes[b - 1], bin_maxes[b], bin_count[b]);
 }
 
+void build_mpi_dtype(int *bins, float *max_data, float *min_data, MPI_Datatype *mpi_dtype) {
+  int blk_lengths[] = {1, 1, 1};
+
+  MPI_Aint base, d1, d2;
+  MPI_Get_address(bins, &base);
+  MPI_Get_address(max_data, &d1);
+  MPI_Get_address(min_data, &d2);
+
+  MPI_Aint deltas[] = {0, d1 - base, d2 - base};
+  MPI_Datatype types[] = {MPI_INT, MPI_FLOAT, MPI_FLOAT};
+
+  MPI_Type_create_struct(3, blk_lengths, deltas, types, mpi_dtype);
+  MPI_Type_commit(mpi_dtype);
+}
+
 int main(int argc, char *argv[]) {
   unsigned long n;
   int bins, rank, p, local_n;
@@ -175,6 +190,9 @@ int main(int argc, char *argv[]) {
   MPI_Init(NULL, NULL);
   MPI_Comm_size(MPI_COMM_WORLD, &p);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  MPI_Datatype common_data;
+  build_mpi_dtype(&bins, &max_data, &min_data, &common_data);
 
   if (!rank) {
     if (argc <= 1) {
@@ -192,10 +210,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // TODO: Use MPI derived datatype
-  MPI_Bcast(&bins, 1, MPI_INT, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&max_data, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&min_data, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&bins, 1, common_data, 0, MPI_COMM_WORLD);
 
   bin_maxes = get_bin_maxes(max_data, min_data, bins);
   local_data = get_local_data(rank, p, n, &local_n, data);
@@ -214,6 +229,8 @@ int main(int argc, char *argv[]) {
 
   if (!rank)
     output_histogram(bins, bin_count, bin_maxes, min_data);
+
+  MPI_Type_free(&common_data);
 
   free(bin_maxes);
   free(bin_count);
