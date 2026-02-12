@@ -35,11 +35,12 @@ double *dot_product(double *A, double *x, int m, int n) {
 
 void get_input(char *fname, int rank, int p, int *n, double **local_A,
                double **local_x, int *local_n) {
-  double *A, *x, *blk_cols;
+  double *A, *x;
   int local_A_n;
-  FILE *f;
 
   if (!rank) {
+    FILE *f;
+
     if (!(f = fopen(fname, "r"))) {
       printf("Error opening file. Aborting. \n");
       MPI_Abort(MPI_COMM_WORLD, 1);
@@ -60,14 +61,18 @@ void get_input(char *fname, int rank, int p, int *n, double **local_A,
       MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    double start = MPI_Wtime();
+    // Sequential read with block-column allocation
+    int k = *n / p;
+    int l = (*n * *n / p) - k;
 
+    double start = MPI_Wtime();
     for (int i = 0; i < *n; i++)
-      for (int j = 0; j < *n; j++)
-        fscanf(f, "%lf", &A[i * *n + j]);
+      for (int r = 0; r < p; r++)
+        for (int j = k * r; j < k * (r + 1); j++)
+          fscanf(f, "%lf", &A[i * k + l * r + j]);
 
     double read_end_time = MPI_Wtime();
-    printf("Read time (%i entries): %lf seconds\n", *n * *n,
+    printf("Matrix read time (%i entries): %lf seconds\n", *n * *n,
            read_end_time - start);
 
     int i = 0;
@@ -79,25 +84,8 @@ void get_input(char *fname, int rank, int p, int *n, double **local_A,
       i++;
     }
 
-    *local_n = *n / p;
-    local_A_n = *local_n * *n;
-
-    blk_cols = (double *)malloc(p * local_A_n * sizeof(double));
-    if (!blk_cols) {
-      printf("Error during memory allocation. Aborting. \n");
-      MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-
-    start = MPI_Wtime();
-    int k = 0;
-    for (int r = 0; r < p; r++)
-      for (int i = 0; i < *n; i++)
-        for (int j = r * *local_n; j < *local_n * (r + 1); j++)
-          blk_cols[k++] = A[i * *n + j];
-
-    double cvt_end_time = MPI_Wtime();
-    printf("Conversion time (block-column): %lf seconds\n",
-           cvt_end_time - start);
+    *local_n = k;
+    fclose(f);
   }
   MPI_Bcast(n, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(local_n, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -114,13 +102,12 @@ void get_input(char *fname, int rank, int p, int *n, double **local_A,
 
   MPI_Scatter(x, *local_n, MPI_DOUBLE, *local_x, *local_n, MPI_DOUBLE, 0,
               MPI_COMM_WORLD);
-  MPI_Scatter(blk_cols, local_A_n, MPI_DOUBLE, *local_A, local_A_n, MPI_DOUBLE,
-              0, MPI_COMM_WORLD);
+  MPI_Scatter(A, local_A_n, MPI_DOUBLE, *local_A, local_A_n, MPI_DOUBLE, 0,
+              MPI_COMM_WORLD);
 
   if (!rank) {
     free(A);
     free(x);
-    free(blk_cols);
   }
 }
 
