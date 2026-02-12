@@ -28,7 +28,7 @@ double *dot_product(double *A, double *x, int m, int n) {
 
   for (int i = 0; i < m; i++)
     for (int j = 0; j < n; j++)
-      y[i] += A[i * n + j] + x[j];
+      y[i] += A[i * n + j] * x[j];
 
   return y;
 }
