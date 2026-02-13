@@ -1,3 +1,18 @@
+/*
+ * Parallel matrix-vector multiplication with block-column distribution
+ *
+ * This program calculates y = A * x, where A is an n×n matrix and x is a
+ * vector of n elements. The input consists of the value of n, followed by
+ * n² real values for A (row-major order) and n real values for x.
+ *
+ * The matrix elements are read and distributed so that after MPI_Scatter,
+ * each process holds a block of columns (local_n = n/p) and the corresponding
+ * block of x. Each process computes its partial y (size n) and an MPI_Reduce
+ * sums these into the final result vector on rank 0.
+ *
+ * The program assumes that n is exactly divisible by the number of processes.
+ */
+
 #include <libgen.h>
 #include <mpi.h>
 #include <stdio.h>
